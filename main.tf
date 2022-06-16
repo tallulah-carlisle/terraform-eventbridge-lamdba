@@ -25,7 +25,7 @@ module "eventbridge" {
   targets = {
     crons = [
       {
-        name  = "lambda-loves-cron"
+        name  = "hello_lambda"
         arn   = var.lambda_function_arn
         input = jsonencode({ "job" : "cron-by-rate" })
       }
@@ -37,33 +37,33 @@ module "eventbridge" {
 # Extra resources
 ##################
 
-resource "random_pet" "this" {
-  length = 2
-}
+# resource "random_pet" "this" {
+#   length = 2
+# }
 
 #############################################
 # Using packaged function from Lambda module
 #############################################
 
-module "lambda" {
-  source  = "terraform-aws-modules/lambda/aws"
-  version = "~> 2.0"
+# module "lambda" {
+#   source  = "terraform-aws-modules/lambda/aws"
+#   version = "~> 2.0"
 
-  function_name = "${random_pet.this.id}-lambda"
-  handler       = "index.lambda_handler"
-  runtime       = "python3.8"
+#   function_name = "hello_lambda"
+#   handler       = "index.lambda_handler"
+#   runtime       = "python3.8"
 
-  create_package         = false
-  local_existing_package = local.downloaded
+#   create_package         = false
+#   local_existing_package = local.downloaded
 
-  create_current_version_allowed_triggers = false
-  allowed_triggers = {
-    ScanAmiRule = {
-      principal  = "events.amazonaws.com"
-      source_arn = module.eventbridge.eventbridge_rule_arns["crons"]
-    }
-  }
-}
+#   create_current_version_allowed_triggers = false
+#   allowed_triggers = {
+#     ScanAmiRule = {
+#       principal  = "events.amazonaws.com"
+#       source_arn = module.eventbridge.eventbridge_rule_arns["crons"]
+#     }
+#   }
+# }
 
 locals {
   package_url = "https://raw.githubusercontent.com/terraform-aws-modules/terraform-aws-lambda/master/examples/fixtures/python3.8-zip/existing_package.zip"
