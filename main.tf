@@ -1,81 +1,43 @@
+# Specify the provider and access details
 provider "aws" {
-  region = "eu-west-2"
-
-  # Make it faster by skipping something
-  skip_get_ec2_platforms      = true
-  skip_metadata_api_check     = true
-  skip_region_validation      = true
-  skip_credentials_validation = true
-  skip_requesting_account_id  = true
+  region = "${var.aws_region}"
 }
 
-module "eventbridge" {
-  source  = "terraform-aws-modules/eventbridge/aws"
-  version = "1.14.0"
+provider "archive" {}
 
-  create_bus = false
+data "archive_file" "zip" {
+  type        = "zip"
+  source_file = "autoscaling.py"
+  output_path = "autoscaling.zip"
+}
 
-  rules = {
-    crons = {
-      description         = "Trigger for a Lambda"
-      schedule_expression = "rate(5 minutes)"
+data "aws_iam_policy_document" "policy" {
+  statement {
+    sid    = ""
+    effect = "Allow"
+
+    principals {
+      identifiers = ["lambda.amazonaws.com"]
+      type        = "Service"
     }
-  }
 
-  targets = {
-    crons = [
-      {
-        name  = "lambda-loves-cron"
-        arn   = var.lambda_function_arn
-        input = jsonencode({ "job" : "cron-by-rate" })
-      }
-    ]
+    actions = ["sts:AssumeRole"]
   }
 }
 
-##################
-# Extra resources
-##################
-
-resource "random_pet" "this" {
-  length = 2
+resource "aws_iam_role" "iam_for_lambda" {
+  name               = "iam_for_lambda"
+  assume_role_policy = "${data.aws_iam_policy_document.policy.json}"
 }
 
-#############################################
-# Using packaged function from Lambda module
-#############################################
+resource "aws_lambda_function" "lambda" {
+  function_name = "auto_scaler"
 
-module "lambda" {
-  source  = "terraform-aws-modules/lambda/aws"
-  version = "~> 2.0"
+  filename         = "${data.archive_file.zip.output_path}"
+  source_code_hash = "${data.archive_file.zip.output_base64sha256}"
 
-  function_name = "${random_pet.this.id}-lambda"
-  handler       = "index.lambda_handler"
-  runtime       = "python3.8"
+  role    = "${aws_iam_role.iam_for_lambda.arn}"
+  handler = "autoscaling.lambda_handler"
+  runtime = "python3.9"
 
-  create_package         = false
-  local_existing_package = local.downloaded
-
-  create_current_version_allowed_triggers = false
-  allowed_triggers = {
-    ScanAmiRule = {
-      principal  = "events.amazonaws.com"
-      source_arn = module.eventbridge.eventbridge_rule_arns["crons"]
-    }
-  }
-}
-
-locals {
-  package_url = "https://raw.githubusercontent.com/terraform-aws-modules/terraform-aws-lambda/master/examples/fixtures/python3.8-zip/existing_package.zip"
-  downloaded  = "downloaded_package_${md5(local.package_url)}.zip"
-}
-
-resource "null_resource" "download_package" {
-  triggers = {
-    downloaded = local.downloaded
-  }
-
-  provisioner "local-exec" {
-    command = "curl -L -o ${local.downloaded} ${local.package_url}"
-  }
 }
