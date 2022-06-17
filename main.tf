@@ -18,64 +18,86 @@ module "eventbridge" {
   rules = {
     crons = {
       description         = "Trigger for a Lambda"
-      schedule_expression = "rate(5 minutes)"
+      schedule_expression = "rate(2 minutes)"
     }
   }
 
   targets = {
     crons = [
       {
-        name  = "hello_lambda"
-        arn   = var.lambda_function_arn
+        name  = "hello_lambda_test"
+        arn   = aws_lambda_function.lambda.qualified_arn
         input = jsonencode({ "job" : "cron-by-rate" })
+      },
+      {
+        name = "log-orders-to-cloudwatch"
+        arn  = aws_cloudwatch_log_group.log_group.arn
       }
     ]
   }
 }
 
-##################
-# Extra resources
-##################
-
-# resource "random_pet" "this" {
-#   length = 2
-# }
-
-#############################################
-# Using packaged function from Lambda module
-#############################################
-
-# module "lambda" {
-#   source  = "terraform-aws-modules/lambda/aws"
-#   version = "~> 2.0"
-
-#   function_name = "hello_lambda"
-#   handler       = "index.lambda_handler"
-#   runtime       = "python3.8"
-
-#   create_package         = false
-#   local_existing_package = local.downloaded
-
-#   create_current_version_allowed_triggers = false
-#   allowed_triggers = {
-#     ScanAmiRule = {
-#       principal  = "events.amazonaws.com"
-#       source_arn = module.eventbridge.eventbridge_rule_arns["crons"]
-#     }
-#   }
-# }
-
-locals {
-  package_url = "https://raw.githubusercontent.com/terraform-aws-modules/terraform-aws-lambda/master/examples/fixtures/python3.8-zip/existing_package.zip"
-  downloaded  = "downloaded_package_${md5(local.package_url)}.zip"
+data "archive_file" "zip" {
+  type        = "zip"
+  source_file = "${path.module}/python/hello_lambda.py"
+  output_path = "${path.module}/python/hello_lambda.zip"
 }
 
-resource "null_resource" "download_package" {
-  triggers = {
-    downloaded = local.downloaded
-  }
+data "aws_iam_policy_document" "policy" {
+  statement {
+    sid    = ""
+    effect = "Allow"
 
-  provisioner "local-exec" {
-    command = "curl -L -o ${local.downloaded} ${local.package_url}"
+    principals {
+      identifiers = ["lambda.amazonaws.com"]
+      type        = "Service"
+    }
+
+    actions = ["sts:AssumeRole"]
+  }
+}
+
+resource "aws_iam_role" "iam_for_lambda_test" {
+  name               = "iam_for_lambda_test"
+  assume_role_policy = data.aws_iam_policy_document.policy.json
+}
+
+resource "aws_iam_role_policy_attachment" "role-policy-attachment" {
+  for_each = toset([
+    "arn:aws:iam::889605739882:policy/service-role/AWSLambdaBasicExecutionRole-b11f14a3-9353-44dc-948d-ae0a3725f5d6",
+    "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess",
+    "arn:aws:iam::889605739882:policy/AmazonEKSClusterAutoscalerPolicy"
+  ])
+  role       = aws_iam_role.iam_for_lambda_test.name
+  policy_arn = each.value
+}
+
+resource "aws_cloudwatch_log_group" "log_group" {
+  name              = "/aws/lambda/hello_lambda_test"
+  retention_in_days = 14
+}
+
+resource "aws_cloudwatch_log_stream" "foo" {
+  name           = "hello_lambda_stream"
+  log_group_name = aws_cloudwatch_log_group.log_group.name
+}
+
+resource "aws_lambda_function" "lambda" {
+  function_name = "hello_lambda_test"
+
+  filename         = "${path.module}/python/hello_lambda.zip"
+  source_code_hash = data.archive_file.zip.output_base64sha256
+  role             = aws_iam_role.iam_for_lambda_test.arn
+  handler          = "hello_lambda.lambda_handler"
+  runtime          = "python3.6"
+
+  depends_on = [
+    aws_cloudwatch_log_group.log_group
+  ]
+
+  environment {
+    variables = {
+      greeting = "Hello"
+    }
   }
 }
