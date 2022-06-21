@@ -26,12 +26,14 @@ module "eventbridge" {
     crons = [
       {
         name  = "hello_lambda_test"
-        arn   = aws_lambda_function.lambda.qualified_arn
+        arn   = aws_lambda_function.lambda.arn
+        role_name = aws_iam_role.iam_for_lambda_test.name
         input = jsonencode({ "job" : "cron-by-rate" })
       },
       {
         name = "log-orders-to-cloudwatch"
         arn  = aws_cloudwatch_log_group.log_group.arn
+        role_name = aws_iam_role.iam_for_lambda_test.name
       }
     ]
   }
@@ -41,6 +43,14 @@ data "archive_file" "zip" {
   type        = "zip"
   source_file = "${path.module}/python/hello_lambda.py"
   output_path = "${path.module}/python/hello_lambda.zip"
+}
+
+resource "aws_lambda_permission" "allow_cloudwatch" {
+  statement_id  = "AllowExecutionFromCloudWatch"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.lambda.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = module.eventbridge.eventbridge_rule_arns["crons"]
 }
 
 data "aws_iam_policy_document" "policy" {
@@ -77,7 +87,7 @@ resource "aws_cloudwatch_log_group" "log_group" {
   retention_in_days = 14
 }
 
-resource "aws_cloudwatch_log_stream" "foo" {
+resource "aws_cloudwatch_log_stream" "lambda_stream" {
   name           = "hello_lambda_stream"
   log_group_name = aws_cloudwatch_log_group.log_group.name
 }
