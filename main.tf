@@ -9,7 +9,7 @@ provider "aws" {
   skip_requesting_account_id  = true
 }
 
-# EventBridge rule and targets
+# EventBridge rules and targets
 module "eventbridge" {
   source  = "terraform-aws-modules/eventbridge/aws"
   version = "1.14.0"
@@ -17,22 +17,40 @@ module "eventbridge" {
   create_bus = false
 
   rules = {
-    crons = {
-      description         = "Trigger for a Lambda"
+    cron-scale-down = {
+      description         = "Trigger for a Lambda to scale down"
       schedule_expression = "cron(0 20 * * ? *)"
+    },
+    cron-scale-up = {
+      description         = "Trigger for a Lambda to scale up"
+      schedule_expression = "cron(0 7 * * ? *)"
     }
   }
 
   targets = {
-    crons = [
+    # Pass input: 'asg_name', 'min', 'max' and 'desired' variables to lambda function
+    cron-scale-down = [
       {
         name  = "lambda_autoscaling"
         arn   = aws_lambda_function.lambda.arn
         role_name = aws_iam_role.iam_for_lambda_autoscaling.name
-        input = jsonencode({ "job" : "cron-by-rate" })
+        input = jsonencode({ "job" : "cron-by-rate","asg_name" : "eks-dea-01-general-220220526073619074400000017-6ac07fa5-bf53-3b68-1a34-38bc296b69f0", "min" : "1", "max" : "14", "desired" : "1"})
       },
       {
         name = "log-orders-to-cloudwatch"
+        arn  = aws_cloudwatch_log_group.log_group.arn
+        role_name = aws_iam_role.iam_for_lambda_autoscaling.name
+      }
+    ]
+    cron-scale-up = [
+      {
+        name  = "lambda_autoscaling2"
+        arn   = aws_lambda_function.lambda.arn
+        role_name = aws_iam_role.iam_for_lambda_autoscaling.name
+        input = jsonencode({ "job" : "cron-by-rate", "asg_name" : "eks-dea-01-general-220220526073619074400000017-6ac07fa5-bf53-3b68-1a34-38bc296b69f0","min" : "1","max" : "16","desired" : "1" })
+      },
+      {
+        name = "log-orders-to-cloudwatch2"
         arn  = aws_cloudwatch_log_group.log_group.arn
         role_name = aws_iam_role.iam_for_lambda_autoscaling.name
       }
@@ -99,15 +117,15 @@ resource "aws_lambda_function" "lambda" {
   ]
 
   # Variables passed to the lambda function
-  environment {
-    variables = {
-      # change autoscaling group name for region
-      asg_name = "eks-dea-01-general-220220526073619074400000017-6ac07fa5-bf53-3b68-1a34-38bc296b69f0"
-      min = 1
-      max = 15
-      desired = 1
-    }
-  }
+  # environment {
+  #   variables = {
+  #     # change autoscaling group name for region
+  #     asg_name = "eks-dea-01-general-220220526073619074400000017-6ac07fa5-bf53-3b68-1a34-38bc296b69f0"
+  #     min = 1
+  #     max = 15
+  #     desired = 1
+  #   }
+  # }
 }
 
 # Permission to invoke lmabda function
@@ -116,7 +134,14 @@ resource "aws_lambda_permission" "allow_cloudwatch" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.lambda.function_name
   principal     = "events.amazonaws.com"
-  source_arn    = module.eventbridge.eventbridge_rule_arns["crons"]
+  source_arn    = module.eventbridge.eventbridge_rule_arns["cron-scale-down"]
+}
+resource "aws_lambda_permission" "allow_cloudwatch2" {
+  statement_id  = "AllowExecutionFromCloudWatch2"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.lambda.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = module.eventbridge.eventbridge_rule_arns["cron-scale-up"]
 }
 
 # Create kms key for lambda
