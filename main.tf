@@ -19,7 +19,7 @@ module "eventbridge" {
   rules = {
     crons = {
       description         = "Trigger for a Lambda"
-      schedule_expression = "cron(8 20 * * ? *)"
+      schedule_expression = "cron(0 20 * * ? *)"
     }
   }
 
