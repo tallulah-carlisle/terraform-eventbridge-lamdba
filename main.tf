@@ -1,5 +1,5 @@
 provider "aws" {
-  region = "eu-west-2"
+  region = "eu-west-1"
 
   # Make it faster by skipping something
   skip_get_ec2_platforms      = true
@@ -53,14 +53,6 @@ data "archive_file" "zip" {
   output_path = "${path.module}/python/lambda_autoscaling.zip"
 }
 
-resource "aws_lambda_permission" "allow_cloudwatch" {
-  statement_id  = "AllowExecutionFromCloudWatch"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.lambda.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = module.eventbridge.eventbridge_rule_arns["crons"]
-}
-
 data "aws_iam_policy_document" "policy" {
   statement {
     sid    = ""
@@ -75,6 +67,7 @@ data "aws_iam_policy_document" "policy" {
   }
 }
 
+# change role name for different region
 resource "aws_iam_role" "iam_for_lambda_autoscaling" {
   name               = "iam_for_lambda_autoscaling"
   assume_role_policy = data.aws_iam_policy_document.policy.json
@@ -99,6 +92,7 @@ resource "aws_lambda_function" "lambda" {
   role             = aws_iam_role.iam_for_lambda_autoscaling.arn
   handler          = "lambda_autoscaling.lambda_handler"
   runtime          = "python3.6"
+  kms_key_arn      = aws_kms_key.a.arn
 
   depends_on = [
     aws_cloudwatch_log_group.log_group
@@ -107,10 +101,26 @@ resource "aws_lambda_function" "lambda" {
   # Variables passed to the lambda function
   environment {
     variables = {
-      asg_name = "eks-node-group-cloudnative-poc-42beabc6-9384-ecef-28ee-cee4f0b02f4c"
+      # change autoscaling group name for region
+      asg_name = "eks-dea-01-general-220220526073619074400000017-6ac07fa5-bf53-3b68-1a34-38bc296b69f0"
       min = 1
-      max = 30
-      desired = 7
+      max = 15
+      desired = 1
     }
   }
+}
+
+# Permission to invoke lmabda function
+resource "aws_lambda_permission" "allow_cloudwatch" {
+  statement_id  = "AllowExecutionFromCloudWatch"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.lambda.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = module.eventbridge.eventbridge_rule_arns["crons"]
+}
+
+# Create kms key for lambda
+resource "aws_kms_key" "a" {
+  description             = "KMS key eu-west-1"
+  deletion_window_in_days = 10
 }
